@@ -241,8 +241,8 @@ int susfs_get_data_path(struct path *path) {
 
 /* sus_mount */
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-// - Default to true so sus mounts are hidden for non-su processes by default (4.14 legacy behavior)
-DEFINE_STATIC_KEY_TRUE(susfs_is_hide_sus_mnts_for_non_su_procs_enabled);
+// - Default to false so sus mounts are not hidden until the manager enables it (upstream v2.3.0 behavior)
+DEFINE_STATIC_KEY_FALSE(susfs_is_hide_sus_mnts_for_non_su_procs_enabled);
 
 void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info) {
 	struct st_susfs_hide_sus_mnts_for_non_su_procs info = {0};

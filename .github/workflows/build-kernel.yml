@@ -1,0 +1,295 @@
+name: Build Kernel
+
+on:
+  push:
+    branches: [main, bka]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - normal
+          - ksu
+      release:
+        description: 'Create GitHub release'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  KERNEL_PATH: ${{ github.workspace }}
+  OUT_DIR: ${{ github.workspace }}/out
+  KSU_OUT_DIR: ${{ github.workspace }}/out-ksu
+  AK3_DIR: ${{ github.workspace }}/AnyKernel3
+  DEFCONFIG: begonia_user_defconfig
+  KSU_DEFCONFIG: begonia_user_ksu_defconfig
+
+jobs:
+  build:
+    name: Build (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build_type: normal
+            script_args: '-b'
+            artifact_name: 'NoVA-kernel'
+            defconfig: 'begonia_user_defconfig'
+            out_dir: 'out'
+          - build_type: ksu
+            script_args: '-k'
+            artifact_name: 'NoVA-Resukisu-kernel'
+            defconfig: 'begonia_user_ksu_defconfig'
+            out_dir: 'out-ksu'
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++ gcc \
+            git libncurses5-dev libssl-dev libelf-dev make \
+            python3 python3-pip zlib1g-dev zip unzip \
+            aarch64-linux-gnu-gcc arm-linux-gnueabi-gcc \
+            libtinfo5 libtinfo-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.build_type }}-
+
+      - name: Cache clang
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_PATH }}/clang
+          key: clang-aosp-r510928
+
+      - name: Download AOSP Clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ${{ env.CLANG_DIR }}
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r50/clang-r510928.tar.gz -O aosp-clang.tar.gz
+          tar -xf aosp-clang.tar.gz -C ${{ env.CLANG_DIR }}
+          rm aosp-clang.tar.gz
+
+      - name: Download mkdtboimg
+        run: |
+          mkdir -p ${{ env.KERNEL_PATH }}/.tools
+          wget -q -O - "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > ${{ env.KERNEL_PATH }}/.tools/mkdtboimg.py
+          chmod +x ${{ env.KERNEL_PATH }}/.tools/mkdtboimg.py
+
+      - name: Configure ccache
+        run: |
+          ccache -M 10G
+          ccache -o base_dir="${{ env.KERNEL_PATH }}"
+          ccache -o sloppiness=file_macro,include_file_mtime,include_file_ctime
+
+      - name: Build kernel
+        env:
+          ARCH: arm64
+          KBUILD_BUILD_USER: github-actions
+          KBUILD_BUILD_HOST: Nova-Kernel
+          USE_HOST_LEX: yes
+          CCACHE_DIR: ${{ env.CCACHE_DIR }}
+          PATH: ${{ env.CLANG_DIR }}/bin:${{ env.PATH }}
+        run: |
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=github-actions
+          export KBUILD_BUILD_HOST=Nova-Kernel
+          export USE_HOST_LEX=yes
+          export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+          
+          ./nova-build.sh ${{ matrix.script_args }}
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ github.run_number }}
+          path: |
+            ${{ env.KERNEL_PATH }}/*.zip
+          retention-days: 30
+
+      - name: Extract version info
+        id: version
+        run: |
+          ZIP_FILE=$(ls ${{ env.KERNEL_PATH }}/*.zip | head -1)
+          VERSION=$(basename "$ZIP_FILE" .zip)
+          echo "zip_file=$ZIP_FILE" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        if: github.event_name == 'push' && github.ref_type == 'tag' && steps.version.outputs.zip_file != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.version.outputs.version }}
+          body: |
+            ## Kernel Build: ${{ steps.version.outputs.version }}
+            
+            **Build type:** ${{ matrix.build_type }}
+            **Defconfig:** ${{ matrix.defconfig }}
+            **Commit:** ${{ github.sha }}
+            **Build date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            ### Included features:
+            - Linux 4.14 (MTK common)
+            - MediaTek MT6785 (begonia/Redmi Note 8 Pro)
+            - AOSP Clang r510928 (Android 14)
+            ${{ matrix.build_type == 'ksu' && '- ReSukiSU / BakaSU v4.2.0-rc3' || '' }}
+            ${{ matrix.build_type == 'ksu' && '- SUSFS v2.3.0' || '' }}
+            ${{ matrix.build_type == 'ksu' && '- NoMount v2.1.0' || '' }}
+            - AnyKernel3 flashable zip
+            
+            ### Flash instructions:
+            1. Download the zip for your variant
+            2. Flash via custom recovery (TWRP/OFox) or fastboot boot
+            3. Reboot
+          files: ${{ steps.version.outputs.zip_file }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+
+  # Optional: Build both in one job for efficiency
+  build-both:
+    name: Build Both Variants
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++ gcc \
+            git libncurses5-dev libssl-dev libelf-dev make \
+            python3 python3-pip zlib1g-dev zip unzip \
+            aarch64-linux-gnu-gcc arm-linux-gnueabi-gcc \
+            libtinfo5 libtinfo-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-both-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-both-
+
+      - name: Cache clang
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_PATH }}/clang
+          key: clang-aosp-r510928
+
+      - name: Download AOSP Clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ${{ env.CLANG_DIR }}
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r50/clang-r510928.tar.gz -O aosp-clang.tar.gz
+          tar -xf aosp-clang.tar.gz -C ${{ env.CLANG_DIR }}
+          rm aosp-clang.tar.gz
+
+      - name: Download mkdtboimg
+        run: |
+          mkdir -p ${{ env.KERNEL_PATH }}/.tools
+          wget -q -O - "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > ${{ env.KERNEL_PATH }}/.tools/mkdtboimg.py
+          chmod +x ${{ env.KERNEL_PATH }}/.tools/mkdtboimg.py
+
+      - name: Configure ccache
+        run: |
+          ccache -M 10G
+          ccache -o base_dir="${{ env.KERNEL_PATH }}"
+          ccache -o sloppiness=file_macro,include_file_mtime,include_file_ctime
+
+      - name: Build normal kernel
+        env:
+          ARCH: arm64
+          KBUILD_BUILD_USER: github-actions
+          KBUILD_BUILD_HOST: Nova-Kernel
+          USE_HOST_LEX: yes
+          CCACHE_DIR: ${{ env.CCACHE_DIR }}
+          PATH: ${{ env.CLANG_DIR }}/bin:${{ env.PATH }}
+        run: |
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=github-actions
+          export KBUILD_BUILD_HOST=Nova-Kernel
+          export USE_HOST_LEX=yes
+          export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+          
+          ./nova-build.sh -b
+
+      - name: Build KSU kernel
+        env:
+          ARCH: arm64
+          KBUILD_BUILD_USER: github-actions
+          KBUILD_BUILD_HOST: Nova-Kernel
+          USE_HOST_LEX: yes
+          CCACHE_DIR: ${{ env.CCACHE_DIR }}
+          PATH: ${{ env.CLANG_DIR }}/bin:${{ env.PATH }}
+        run: |
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=github-actions
+          export KBUILD_BUILD_HOST=Nova-Kernel
+          export USE_HOST_LEX=yes
+          export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+          
+          ./nova-build.sh -k
+
+      - name: Upload both artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoVA-kernels-${{ github.run_number }}
+          path: |
+            ${{ env.KERNEL_PATH }}/*.zip
+          retention-days: 30
+
+      - name: Create release with both
+        if: github.event.inputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}-${{ github.sha::7 }}
+          name: NoVA Kernel Build #${{ github.run_number }}
+          body: |
+            ## NoVA Kernel Build #${{ github.run_number }}
+            
+            **Commit:** ${{ github.sha }}
+            **Build date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            **Triggered by:** ${{ github.actor }}
+            
+            ### Variants included:
+            - **NoVA** (normal): Standard kernel with FolkPatch support
+            - **NoVA-Resukisu** (KSU): ReSukiSU/BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0
+            
+            ### Common features:
+            - Linux 4.14 (MTK common)
+            - MediaTek MT6785 (begonia/Redmi Note 8 Pro)
+            - AOSP Clang r510928 (Android 14)
+            - FolkPatch / KernelPatch ready (CONFIG_KALLSYMS_ALL, KPROBES, JUMP_LABEL)
+            - Module signing (SHA512)
+            - AnyKernel3 flashable zip
+          files: ${{ env.KERNEL_PATH }}/*.zip
+          draft: false
+          prerelease: true

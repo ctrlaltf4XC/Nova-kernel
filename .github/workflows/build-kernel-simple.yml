@@ -1,0 +1,193 @@
+name: Build Kernel (Simple)
+
+on:
+  push:
+    branches: [main, bka]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Kernel variant to build'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - normal
+          - ksu
+      create_release:
+        description: 'Create GitHub release'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  CCACHE_DIR: /home/runner/.ccache
+  CLANG_DIR: ${{ github.workspace }}/clang
+
+jobs:
+  build:
+    name: Build ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [normal, ksu]
+        include:
+          - variant: normal
+            args: '-b'
+            name: 'NoVA'
+            defconfig: 'begonia_user_defconfig'
+          - variant: ksu
+            args: '-k'
+            name: 'NoVA-Resukisu'
+            defconfig: 'begonia_user_ksu_defconfig'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++ gcc \
+            git libncurses5-dev libssl-dev libelf-dev make \
+            python3 python3-pip zlib1g-dev zip unzip \
+            aarch64-linux-gnu-gcc arm-linux-gnueabi-gcc \
+            libtinfo5 libtinfo-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ matrix.variant }}-${{ hashFiles('**/Makefile') }}
+          restore-keys: ccache-${{ runner.os }}-${{ matrix.variant }}-
+
+      - name: Cache clang
+        uses: actions/cache@v4
+        id: clang-cache
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: clang-aosp-r510928
+
+      - name: Download AOSP Clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ${{ env.CLANG_DIR }}
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r50/clang-r510928.tar.gz -O aosp-clang.tar.gz
+          tar -xf aosp-clang.tar.gz -C ${{ env.CLANG_DIR }}
+          rm aosp-clang.tar.gz
+
+      - name: Setup mkdtboimg
+        run: |
+          mkdir -p ${{ github.workspace }}/.tools
+          wget -q -O - "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > ${{ github.workspace }}/.tools/mkdtboimg.py
+          chmod +x ${{ github.workspace }}/.tools/mkdtboimg.py
+
+      - name: Configure ccache
+        run: |
+          ccache -M 10G
+          ccache -o base_dir="${{ github.workspace }}"
+          ccache -o sloppiness=file_macro,include_file_mtime,include_file_ctime
+
+      - name: Build ${{ matrix.name }}
+        env:
+          ARCH: arm64
+          KBUILD_BUILD_USER: github-actions
+          KBUILD_BUILD_HOST: Nova-Kernel
+          USE_HOST_LEX: yes
+          PATH: ${{ env.CLANG_DIR }}/bin:${{ env.PATH }}
+        run: |
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=github-actions
+          export KBUILD_BUILD_HOST=Nova-Kernel
+          export USE_HOST_LEX=yes
+          export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          
+          ./nova-build.sh ${{ matrix.args }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-kernel-${{ github.run_number }}
+          path: |
+            ${{ github.workspace }}/*.zip
+          retention-days: 30
+
+      - name: Get zip info
+        id: zip
+        run: |
+          ZIP=$(ls ${{ github.workspace }}/*.zip | head -1)
+          echo "file=$ZIP" >> $GITHUB_OUTPUT
+          echo "name=$(basename $ZIP .zip)" >> $GITHUB_OUTPUT
+
+      - name: Create release on tag push
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.zip.outputs.name }}
+          body: |
+            ## ${{ steps.zip.outputs.name }}
+            
+            **Variant:** ${{ matrix.name }}
+            **Defconfig:** ${{ matrix.defconfig }}
+            **Commit:** ${{ github.sha }}
+            **Date:** $(date -u +"%Y-%m-%d %H:%M UTC")
+            
+            ${{ matrix.variant == 'ksu' && '''
+            ### KSU Features:
+            - ReSukiSU / BakaSU v4.2.0-rc3
+            - SUSFS v2.3.0 (all features)
+            - NoMount v2.1.0
+            ''' || ''}}
+            ### Base Features:
+            - Linux 4.14 (MTK common)
+            - MediaTek MT6785 (begonia)
+            - AOSP Clang r510928
+            - FolkPatch ready (KALLSYMS_ALL, KPROBES, JUMP_LABEL)
+            - Module signing (SHA512)
+          files: ${{ steps.zip.outputs.file }}
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') }}
+
+  release-both:
+    name: Release Both Variants
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: *-kernel-${{ github.run_number }}
+
+      - name: Create combined release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}-${{ github.sha::7 }}
+          name: NoVA Kernel Build #${{ github.run_number }} (Both)
+          body: |
+            ## NoVA Kernel Build #${{ github.run_number }}
+            
+            **Commit:** ${{ github.sha }}
+            **Date:** $(date -u +"%Y-%m-%d %H:%M UTC")
+            **Trigger:** Manual workflow dispatch
+            
+            ### Variants:
+            - **NoVA** - Standard kernel (FolkPatch ready)
+            - **NoVA-Resukisu** - KSU variant (BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0)
+            
+            ### Common:
+            - Linux 4.14, MT6785 (begonia)
+            - AOSP Clang r510928
+            - Module signing (SHA512)
+          files: artifacts/**/*.zip
+          prerelease: true

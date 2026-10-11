@@ -35,7 +35,7 @@ else
     echo "==> ccache not found, builds will not be cached (sudo pacman -S ccache to enable)"
 fi
 
-git submodule update --init --recursive KernelSU
+git submodule update --init --recursive
 
 download_clang() {
     if [[ ! -d "$CLANG_DIR/bin" ]]; then
@@ -90,6 +90,9 @@ _compile_and_package() {
         HOSTCC="$HOSTCC_CMD" \
         HOSTCXX="$HOSTCXX_CMD" \
         "$defconfig"
+
+    # Disable THINLTO to avoid LTO cache issues
+    scripts/config --file "$out_dir/.config" --disable THINLTO
 
     (
         exec 2> >(tee -a "$out_dir/error.log" >&2)
@@ -179,10 +182,9 @@ build_kernel() {
 }
 
 build_ksu() {
-    patch -d KernelSU -p1 < "$KERNEL_PATH/ksun.patch"
-    _compile_and_package "$KSU_OUT_DIR" "$KSU_DEFCONFIG" "NoVA-KSU"
+    _compile_and_package "$KSU_OUT_DIR" "$KSU_DEFCONFIG" "NoVA-Resukisu"
 
-    # KernelSU-Next's Kbuild touches the normal defconfig too, revert that
+    # The driver's Kbuild touches the normal defconfig too, revert that
     git checkout -- "arch/arm64/configs/$DEFCONFIG"
 }
 
@@ -192,11 +194,11 @@ case "${1:-}" in
         build_kernel
         ;;
     -k|--build-ksu)
-        rm -f ./NoVA-KSU-*.zip
+        rm -f ./NoVA-Resukisu-*.zip
         build_ksu
         ;;
     -a|--build-all)
-        rm -f ./NoVA-[0-9]*.zip ./NoVA-KSU-*.zip
+        rm -f ./NoVA-[0-9]*.zip ./NoVA-Resukisu-*.zip
         build_kernel
         build_ksu
         ;;
@@ -208,8 +210,8 @@ case "${1:-}" in
         echo "Usage: $0 [option] [defconfig]"
         echo
         echo "  -b, --build       Build normal kernel"
-        echo "  -k, --build-ksu   Build KernelSU + SUSFS kernel"
-        echo "  -a, --build-all   Build both normal and KernelSU kernels"
+        echo "  -k, --build-ksu   Build ReSukiSU + SUSFS kernel"
+        echo "  -a, --build-all   Build both normal and ReSukiSU kernels"
         echo "  -r, --regen       Regenerate defconfig"
         exit 1
         ;;

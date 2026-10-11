@@ -121,6 +121,10 @@ all.config
 # Kdevelop4
 *.kdev4
 
+# Kilo config (local only)
+kilo.json
+.kilo/
+
 # fetched Android config fragments
 kernel/configs/android-*.cfg
 

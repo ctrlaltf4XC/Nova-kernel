@@ -31,6 +31,8 @@ env:
   AK3_DIR: ${{ github.workspace }}/AnyKernel3
   DEFCONFIG: begonia_user_defconfig
   KSU_DEFCONFIG: begonia_user_ksu_defconfig
+  CLANG_DIR: ${{ github.workspace }}/clang
+  CCACHE_DIR: /home/runner/.ccache
 
 jobs:
   build:

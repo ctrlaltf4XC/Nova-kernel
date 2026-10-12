@@ -182,7 +182,7 @@ build_kernel() {
 }
 
 build_ksu() {
-    _compile_and_package "$KSU_OUT_DIR" "$KSU_DEFCONFIG" "NoVA-Resukisu"
+    _compile_and_package "$KSU_OUT_DIR" "$KSU_DEFCONFIG" "NoVA-BakaSU"
 
     # The driver's Kbuild touches the normal defconfig too, revert that
     git checkout -- "arch/arm64/configs/$DEFCONFIG"
@@ -194,11 +194,11 @@ case "${1:-}" in
         build_kernel
         ;;
     -k|--build-ksu)
-        rm -f ./NoVA-Resukisu-*.zip
+        rm -f ./NoVA-BakaSU-*.zip
         build_ksu
         ;;
     -a|--build-all)
-        rm -f ./NoVA-[0-9]*.zip ./NoVA-Resukisu-*.zip
+        rm -f ./NoVA-[0-9]*.zip ./NoVA-BakaSU-*.zip
         build_kernel
         build_ksu
         ;;
@@ -210,7 +210,7 @@ case "${1:-}" in
         echo "Usage: $0 [option] [defconfig]"
         echo
         echo "  -b, --build       Build normal kernel"
-        echo "  -k, --build-ksu   Build ReSukiSU + SUSFS kernel"
+        echo "  -k, --build-ksu   Build BakaSU + SUSFS kernel"
         echo "  -a, --build-all   Build both normal and ReSukiSU kernels"
         echo "  -r, --regen       Regenerate defconfig"
         exit 1

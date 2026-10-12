@@ -44,7 +44,7 @@ jobs:
             defconfig: 'begonia_user_defconfig'
           - variant: ksu
             args: '-k'
-            name: 'NoVA-Resukisu'
+            name: 'NoVA-BakaSU'
             defconfig: 'begonia_user_ksu_defconfig'
     steps:
       - uses: actions/checkout@v4
@@ -182,7 +182,7 @@ jobs:
             
             ### Variants:
             - **NoVA** - Standard kernel (FolkPatch ready)
-            - **NoVA-Resukisu** - KSU variant (BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0)
+            - **NoVA-BakaSU** - KSU variant (BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0)
             
             ### Common:
             - Linux 4.14, MT6785 (begonia)

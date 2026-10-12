@@ -50,7 +50,7 @@ jobs:
             out_dir: 'out'
           - build_type: ksu
             script_args: '-k'
-            artifact_name: 'NoVA-Resukisu-kernel'
+            artifact_name: 'NoVA-BakaSU-kernel'
             defconfig: 'begonia_user_ksu_defconfig'
             out_dir: 'out-ksu'
     steps:
@@ -282,7 +282,7 @@ jobs:
             
             ### Variants included:
             - **NoVA** (normal): Standard kernel with FolkPatch support
-            - **NoVA-Resukisu** (KSU): ReSukiSU/BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0
+            - **NoVA-BakaSU** (KSU): BakaSU v4.2.0-rc3 + SUSFS v2.3.0 + NoMount v2.1.0
             
             ### Common features:
             - Linux 4.14 (MTK common)

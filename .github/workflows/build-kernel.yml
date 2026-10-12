@@ -155,7 +155,7 @@ jobs:
             - Linux 4.14 (MTK common)
             - MediaTek MT6785 (begonia/Redmi Note 8 Pro)
             - AOSP Clang r510928 (Android 14)
-            ${{ matrix.build_type == 'ksu' && '- ReSukiSU / BakaSU v4.2.0-rc3' || '' }}
+            ${{ matrix.build_type == 'ksu' && '- BakaSU v4.2.0-rc3' || '' }}
             ${{ matrix.build_type == 'ksu' && '- SUSFS v2.3.0' || '' }}
             ${{ matrix.build_type == 'ksu' && '- NoMount v2.1.0' || '' }}
             - AnyKernel3 flashable zip

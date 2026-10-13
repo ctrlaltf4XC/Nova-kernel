@@ -867,6 +867,7 @@ out:
 	ocfs2_inode_unlock(sb_dqopt(sb)->files[type], 1);
 	brelse(oinfo->dqi_libh);
 	brelse(oinfo->dqi_lqi_bh);
+	info->dqi_priv = NULL;
 	kfree(oinfo);
 	return 0;
 }
